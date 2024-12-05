@@ -7,8 +7,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public interface dealerI {
-    public void play(List<client> players, Map<client, Boolean> activePlayers, int numberOfActivePlayer);
-    public void playRounds(client player, String action);
+    public void play(List<client> players, Map<String, Boolean> activePlayers, int numberOfActivePlayer);
+    public void playRounds(String action);
     public client checkPlayerTurn();
-    public void handleBet(client player, int amount, String bet);
+    public void handleBet(int amount, String bet);
 }

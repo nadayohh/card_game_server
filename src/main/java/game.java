@@ -22,6 +22,10 @@ public class game {
         return list.get(idx).numberOfPlayer();
     }
 
+    public synchronized room getRoomInstance(int idx){
+        return list.get(idx);
+    }
+
     public synchronized room enterRoom(int idx, client thread) {
         list.get(idx).join(thread);
         return list.get(idx);

@@ -97,12 +97,13 @@ public class messageGenerator {
         response.put("data", data);
         return response;
     }
-    public JSONObject gameResult(int amount, String result, List<Card> dealerCards, List<Card> playerCards){
+    public JSONObject gameResult(int amount, String result, List<Card> playerCards, List<Card> dealerCards){
         response = new JSONObject();
         data = new JSONObject();
         response.put("response", "gameResult");
         data.put("result", result)
                 .put("playerCards", playerCards)
+                .put("dealerCards", dealerCards)
                 .put("prize", amount);
         response.put("data", data);
         return response;

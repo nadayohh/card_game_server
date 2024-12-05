@@ -5,16 +5,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class casinoWarDealer implements dealerI {
     private room room;
     private Deck deck = new Deck();
-    private List<Card> dealerCards = new ArrayList<>();
-    private Map<client, List<Card>> playerHands = new HashMap<>();
-    private Map<client, Integer> currentBets = new HashMap<>();
-    private Map<client, Boolean> warOccur = new HashMap<>();
-    private boolean playerAct = false;
-    private client playerTurn;
+    private final List<Card> dealerCards = new CopyOnWriteArrayList<>();
+    private final Map<String, List<Card>> playerHands = new ConcurrentHashMap<>();
+    private final Map<String, Integer> currentBets = new ConcurrentHashMap<>();
+    private final AtomicBoolean playerAct = new AtomicBoolean(false);
+    private volatile client playerTurn;
     private ScheduledExecutorService timerExecutor;
     private int roundTime = 30;
     private CountDownLatch counter;
@@ -29,7 +29,7 @@ public class casinoWarDealer implements dealerI {
         return this.playerTurn;
     }
 
-    public void play(List<client> players, Map<client, Boolean> activePlayers, int numberOfActivePlayer){
+    public void play(List<client> players, Map<String, Boolean> activePlayers, int numberOfActivePlayer){
         timerExecutor = Executors.newScheduledThreadPool(1);
         deck = new Deck();
         deck.shuffle();
@@ -38,95 +38,105 @@ public class casinoWarDealer implements dealerI {
         waitForAct(players, activePlayers);
         timerExecutor.shutdown();
     }
-    private void dealInitialCards(List<client> players){
+    private synchronized void dealInitialCards(List<client> players){
         dealerCards.add(deck.drawCard());
         for(client player : players){
             List<Card> hand = new ArrayList<>();
             hand.add(deck.drawCard());
-            playerHands.put(player,hand);
-            player.sendMessage(mg.casinoWarCard(playerHands.get(player)).toString());
+            playerHands.put(player.getName(),hand);
+            player.sendMessage(mg.casinoWarCard(playerHands.get(player.getName())).toString());
         }
     }
 
-    public void playRounds(client player, String action){
+    public synchronized void playRounds(String action){
         int prize;
         String result;
-        if(playerHands.get(player).getFirst().getRank()> dealerCards.getFirst().getRank()){
+        if(playerHands.get(playerTurn.getName()).getFirst().getRank()> dealerCards.getFirst().getRank()){
             result = "win";
-            prize = currentBets.get(player)*2;
-            player.getUserInstance().addMoney(currentBets.get(player)*2);
-            player.sendMessage(mg.gameResult(prize, result, playerHands.get(player), dealerCards).toString());
-            warOccur.put(player, false);
-        }else if(playerHands.get(player).getFirst().getRank()> dealerCards.getFirst().getRank()) {
+            prize = currentBets.get(playerTurn.getName())*2;
+            playerTurn.getUserInstance().addMoney(currentBets.get(playerTurn.getName())*2);
+            playerTurn.sendMessage(mg.gameResult(prize, result, playerHands.get(playerTurn.getName()), dealerCards).toString());
+            playerAct.set(true);
+        }else if(playerHands.get(playerTurn.getName()).getFirst().getRank()> dealerCards.getFirst().getRank()) {
             result = "lose";
             prize = 0;
-            player.sendMessage(mg.gameResult(prize, result, playerHands.get(player), dealerCards).toString());
-            warOccur.put(player, false);
+            playerTurn.sendMessage(mg.gameResult(prize, result, playerHands.get(playerTurn.getName()), dealerCards).toString());
+            playerAct.set(true);
         }else {
             result = "war";
             prize = 0;
-            player.sendMessage(mg.gameResult(prize, result, playerHands.get(player), dealerCards).toString());
-            warOccur.put(player, true);
+            playerTurn.sendMessage(mg.gameResult(prize, result,playerHands.get(playerTurn.getName()), dealerCards).toString());
         }
+        JSONObject response = new JSONObject();
+        JSONObject data = new JSONObject();
+        response.put("response", "gameResult");
+        data.put("result", result)
+                .put("playerCards", playerHands.get(playerTurn.getName()))
+                .put("dealerCards", dealerCards)
+                .put("prize", prize)
+                .put("player", playerTurn.getName());
+        response.put("data", data);
+        room.broadcast(response.toString());
     }
 
-    public void resolveWar(client player, String gotoWar, int additionalBet){
-        int totalBet = currentBets.get(player);
+    public void resolveWar(String gotoWar, int additionalBet){
+        int totalBet = currentBets.get(playerTurn.getName());
         String result;
         int prize;
         if(gotoWar.equals("true")){
             totalBet += additionalBet;
-            playerHands.get(player).add(deck.drawCard());
+            playerHands.get(playerTurn.getName()).add(deck.drawCard());
             dealerCards.add(deck.drawCard());
-            if(playerHands.get(player).getLast().getRank()> dealerCards.getLast().getRank()){
+            if(playerHands.get(playerTurn.getName()).getLast().getRank()> dealerCards.getLast().getRank()){
                 result = "win";
                 prize = totalBet*2;
-                player.getUserInstance().addMoney(prize);
-            }else if(playerHands.get(player).getLast().getRank()> dealerCards.getLast().getRank()){
+                playerTurn.getUserInstance().addMoney(prize);
+            }else if(playerHands.get(playerTurn.getName()).getLast().getRank()> dealerCards.getLast().getRank()){
                 result = "lose";
                 prize = 0;
             }else{
                 result = "lose";
                 prize = totalBet;
-                player.getUserInstance().addMoney(totalBet);
+                playerTurn.getUserInstance().addMoney(totalBet);
             }
         }else{
             result = "surrender";
             prize = totalBet/2;
         }
-        player.sendMessage(mg.gameResult(prize, result, playerHands.get(player), dealerCards).toString());
+        playerTurn.sendMessage(mg.gameResult(prize, result, playerHands.get(playerTurn.getName()), dealerCards).toString());
+        playerAct.set(true);
     }
 
-    public void handleBet(client player, int amount, String bet){
-        if(player.getUserInstance().getMoney()<amount){
-            player.sendMessage(mg.errorMessage("not enough money").toString());
+    public void handleBet(int amount, String bet){
+        if(playerTurn.getUserInstance().getMoney()<amount){
+            playerTurn.sendMessage(mg.errorMessage("not enough money").toString());
             return;
         }
-        player.getUserInstance().betMoney(amount);
-        currentBets.put(player, amount);
-        room.broadcastGameUpdate(player.getName(), amount);
-        playerAct = true;
+        playerTurn.getUserInstance().betMoney(amount);
+        currentBets.put(playerTurn.getName(), amount);
+        room.broadcastGameUpdate(playerTurn.getName(), amount);
+        playerAct.set(true);
     }
 
-    private void handleTimeouts(client player, Map<client, Boolean> activePlayers){
-        activePlayers.remove(player);
-        activePlayers.put(player,false);
+    private void handleTimeouts(client player, Map<String, Boolean> activePlayers){
+        activePlayers.remove(player.getName());
+        activePlayers.put(player.getName(),false);
         player.sendMessage(mg.errorMessage("timeout").toString());
     }
 
-    private void waitForAct(List<client> players, Map<client, Boolean> activePlayers){
+    private void waitForAct(List<client> players, Map<String, Boolean> activePlayers){
         for(client player : players){
-            if(!activePlayers.get(player)) continue;
+            if(!activePlayers.get(player.getName())) continue;
             playerTurn = player;
             this.counter = new CountDownLatch(1);
             ScheduledFuture<?> future = timerExecutor.scheduleAtFixedRate(()->{
-                if(roundTime > 0 && !playerAct){
+                if(roundTime > 0 && !playerAct.get()){
                     room.broadcastTimer(roundTime);
                     roundTime--;
                 }else{
                     if(roundTime<=0) handleTimeouts(player, activePlayers);
                     roundTime = 30;
-                    playerAct = false;
+                    playerAct.set(false);
                     room.broadcastTimer(roundTime);
                     counter.countDown();
                 }

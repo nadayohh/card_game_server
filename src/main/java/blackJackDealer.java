@@ -1,16 +1,15 @@
-import org.json.JSONObject;
-
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class blackJackDealer implements dealerI{
     private room room;
     private messageGenerator mg;
     private Deck deck = new Deck();
-    private List<Card> dealerCards = new ArrayList<>();
-    private Map<client, List<Card>> playerHands = new HashMap<>();
-    private Map<client, Integer> currentBets = new HashMap<>();
-    private volatile boolean playerAct = false;
+    private List<Card> dealerCards = new CopyOnWriteArrayList<>();
+    private volatile Map<String, List<Card>> playerHands = new ConcurrentHashMap<String, List<Card>>();
+    private volatile Map<String, Integer> currentBets = new ConcurrentHashMap<>();
+    private AtomicBoolean playerAct = new AtomicBoolean(false);
     private volatile client playerTurn;
     private ScheduledExecutorService timerExecutor;
     private volatile int roundTime = 30;
@@ -25,7 +24,7 @@ public class blackJackDealer implements dealerI{
         return this.playerTurn;
     }
 
-    public void play(List<client> players, Map<client, Boolean> activePlayers, int numberOfActivePlayer){
+    public void play(List<client> players, Map<String, Boolean> activePlayers, int numberOfActivePlayer){
         timerExecutor = Executors.newScheduledThreadPool(1);
         deck.shuffle();
         waitForAct(players, activePlayers);
@@ -41,7 +40,7 @@ public class blackJackDealer implements dealerI{
             List<Card> hand = new ArrayList<>();
             hand.add(deck.drawCard());
             hand.add(deck.drawCard());
-            playerHands.put(player, hand);
+            playerHands.put(player.getName(), hand);
             player.sendMessage(mg.blackJackCard(hand, dealerCards).toString());
         }
     }
@@ -61,36 +60,37 @@ public class blackJackDealer implements dealerI{
         return value;
     }
 
-    public void handleBet(client player, int amount, String bet){
-        if(player.getUserInstance().getMoney()<amount){
-            player.sendMessage(mg.errorMessage("잔액 부족").toString());
+    public void handleBet(int amount, String bet){
+        playerAct.set(true);
+        if(playerTurn.getUserInstance().getMoney()<amount){
+            playerTurn.sendMessage(mg.errorMessage("잔액 부족").toString());
             return;
         }
-        player.getUserInstance().betMoney(amount);
-        currentBets.put(player, amount);
-        room.broadcastGameUpdate(player.getName(), amount);
-        playerAct = true;
+        playerTurn.getUserInstance().betMoney(amount);
+        currentBets.put(playerTurn.getName(), amount);
+        room.broadcastGameUpdate(playerTurn.getName(), amount);
     }
 
-    private void handleTimeouts(client player, Map<client, Boolean> activePlayers){
-        activePlayers.remove(player);
-        activePlayers.put(player,false);
+    private void handleTimeouts(client player, Map<String, Boolean> activePlayers){
+        activePlayers.remove(player.getName());
+        activePlayers.put(player.getName(),false);
         player.sendMessage(mg.errorMessage("timeout").toString());
     }
 
-    public void playRounds(client player, String action){
-        int playerValue = getHandValue(playerHands.get(player));
+    public void playRounds(String action){
+        playerAct.set(true);
+        int playerValue = getHandValue(playerHands.get(playerTurn.getName()));
         int dealerValue = getHandValue(dealerCards);
         String result;
         if(action.equals("hit")){
-            playerHands.get(player).add(deck.drawCard());
-            int handValue = getHandValue(playerHands.get(player));
+            playerHands.get(playerTurn.getName()).add(deck.drawCard());
+            int handValue = getHandValue(playerHands.get(playerTurn.getName()));
             if(handValue>21){
                 result = "bust";
-                player.sendMessage(mg.gameResult(0, result, playerHands.get(player), dealerCards).toString());
+                playerTurn.sendMessage(mg.gameResult(0, result, playerHands.get(playerTurn.getName()), dealerCards).toString());
                 return;
             }
-            playerValue = getHandValue(playerHands.get(player));
+            playerValue = getHandValue(playerHands.get(playerTurn.getName()));
             dealerValue = getHandValue(dealerCards);
         }else if(action.equals("stand")) {
             while (getHandValue(dealerCards) < 17) {
@@ -99,30 +99,29 @@ public class blackJackDealer implements dealerI{
         }
         if(dealerValue>21 || playerValue>dealerValue){
             result = "win";
-            player.getUserInstance().addMoney(currentBets.get(player)*2);
+            playerTurn.getUserInstance().addMoney(currentBets.get(playerTurn.getName())*2);
         }else if(playerValue==dealerValue){
             result = "push";
-            player.getUserInstance().addMoney(currentBets.get(player));
+            playerTurn.getUserInstance().addMoney(currentBets.get(playerTurn.getName()));
         }else{
             result = "lose";
         }
-        player.sendMessage(mg.gameResult(player.getUserInstance().getMoney(), result, playerHands.get(player), dealerCards).toString());
-        playerAct = true;
+        playerTurn.sendMessage(mg.gameResult(playerTurn.getUserInstance().getMoney(), result, playerHands.get(playerTurn.getName()), dealerCards).toString());
     }
 
-    private synchronized void waitForAct(List<client> players, Map<client, Boolean> activePlayers){
+    private void waitForAct(List<client> players, Map<String, Boolean> activePlayers){
         for(client player : players){
-            if(!activePlayers.get(player)) continue;
+            if(!activePlayers.get(player.getName())) continue;
             playerTurn = player;
             this.counter = new CountDownLatch(1);
             ScheduledFuture<?> future = timerExecutor.scheduleAtFixedRate(()->{
-                if(roundTime > 0 && !playerAct){
+                if(roundTime > 0 && !playerAct.get()){
                     room.broadcastTimer(roundTime);
                     roundTime--;
                 }else{
                     if(roundTime<=0) handleTimeouts(player, activePlayers);
                     roundTime = 30;
-                    playerAct = false;
+                    playerAct.set(false);
                     room.broadcastTimer(roundTime);
                     counter.countDown();
                 }
