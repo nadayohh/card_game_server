@@ -3,6 +3,7 @@ import org.json.JSONObject;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class room extends Thread{
     private String roomName;
@@ -11,7 +12,7 @@ public class room extends Thread{
     private volatile client leader;
     private volatile dealerI dealer;
     private int maxPlayer = 8;
-    private boolean gameInProgress = false;
+    private AtomicBoolean gameInProgress = new AtomicBoolean(false);
     private messageGenerator mg;
     private int gameId;
 
@@ -33,7 +34,7 @@ public class room extends Thread{
         if(numberOfPlayer() > maxPlayer){
             client.sendMessage(mg.errorMessage("enter Failed").toString());
         }
-        if(gameInProgress){
+        if(gameInProgress.get()){
             players.add(client);
             activePlayers.put(client.getName(), false);
         }else{
@@ -59,21 +60,27 @@ public class room extends Thread{
     }
 
     public void run(){
-        broadcast(""+numberOfPlayer());
-        if(gameId==0){
-            dealer = new blackJackDealer(this, mg);
-        }else if(gameId==1){
-            dealer = new casinoWarDealer(this, mg);
-        }else{
-            dealer = new baccaratDealer(this, mg);
+        while(true){
+            if(gameId==0){
+                dealer = new blackJackDealer(this, mg);
+            }else if(gameId==1){
+                dealer = new casinoWarDealer(this, mg);
+            }else{
+                dealer = new baccaratDealer(this, mg);
+            }
+            gameInProgress.set(true);
+            dealer.play(players, activePlayers, numberOfActivePlayer());
+            gameInProgress.set(false);
+            while(!gameInProgress.get());
         }
-        gameInProgress = true;
-        dealer.play(players, activePlayers, numberOfActivePlayer());
-        gameInProgress = false;
     }
 
     public boolean isLeader(client player){
         return leader == player;
+    }
+
+    public void changeRoomState(boolean flag){
+        gameInProgress.set(flag);
     }
 
     private int numberOfActivePlayer(){

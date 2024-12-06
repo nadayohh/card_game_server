@@ -69,7 +69,12 @@ public class client extends Thread{
                     this.room = game.enterRoom(roomId, this);
                 }else if(request.equals("start")){
                     if(room.isLeader(this)){
-                        room.start();
+                        if((room.getState()==State.NEW)){
+                            room.start();
+                        }
+                        else{
+                            room.changeRoomState(true);
+                        }
                     }else{
                         sendMessage(mg.errorMessage("you are not leader").toString());
                     }

@@ -5,9 +5,9 @@ import java.sql.SQLException;
 import java.util.LinkedList;
 
 public class cnPool {
-    private String url = "jdbc:mysql://localhost:3306/jdbc";
-    private String user = "root";
-    private String pwd = "Korean12!@";
+    private String url = "jdbc:mysql://chabin37.iptime.org:3306/cardmaster_db";
+    private String user = "cardmaster10";
+    private String pwd = "password";
     static final int INITIAL_CAPACITY = 10;
     LinkedList<Connection> pool = new LinkedList<Connection>();
 

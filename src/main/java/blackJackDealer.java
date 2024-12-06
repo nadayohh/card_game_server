@@ -61,7 +61,6 @@ public class blackJackDealer implements dealerI{
     }
 
     public void handleBet(int amount, String bet){
-        playerAct.set(true);
         if(playerTurn.getUserInstance().getMoney()<amount){
             playerTurn.sendMessage(mg.errorMessage("잔액 부족").toString());
             return;
@@ -69,6 +68,7 @@ public class blackJackDealer implements dealerI{
         playerTurn.getUserInstance().betMoney(amount);
         currentBets.put(playerTurn.getName(), amount);
         room.broadcastGameUpdate(playerTurn.getName(), amount);
+        playerAct.set(true);
     }
 
     private void handleTimeouts(client player, Map<String, Boolean> activePlayers){
@@ -78,7 +78,6 @@ public class blackJackDealer implements dealerI{
     }
 
     public void playRounds(String action){
-        playerAct.set(true);
         int playerValue = getHandValue(playerHands.get(playerTurn.getName()));
         int dealerValue = getHandValue(dealerCards);
         String result;
@@ -106,6 +105,7 @@ public class blackJackDealer implements dealerI{
         }else{
             result = "lose";
         }
+        playerAct.set(true);
         playerTurn.sendMessage(mg.gameResult(playerTurn.getUserInstance().getMoney(), result, playerHands.get(playerTurn.getName()), dealerCards).toString());
     }
 
